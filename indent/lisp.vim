@@ -34,6 +34,7 @@ function! CLUndo()
    vunmap <Tab>
    nunmap <C-\>
    iunmap <C-\>
+   let b:did_ftplugin=0
 endfunction
 
 " -------------------------------------------------------
@@ -76,10 +77,9 @@ function! Set_indent(line,ind)
    let current=getline(a:line)
    " get previous indent
    let indent_size=match(current,"[^\n\t ]")
-   let indent=substitute(strpart(current,0,indent_size),"\t",repeat(" ",&tabstop),"g")
    " cut off indentation whitespace
    let current=strpart(current,indent_size)
-   let indent_size=strlen(indent)
+   let indent_size=indent(a:line)
    " set according to vim rules
    if !&expandtab
       let tabs=a:ind / &tabstop
@@ -210,6 +210,7 @@ function! Lisp_reader(pos_start,pos_end,lines)
       else
 	 let ind=s:stack[0][2]+s:changed_indent[s:stack[0][1]]
       endif
+      let ind+= (match(getline(s:stack[0][1]),"[^\t]")*(&tabstop-1))
       return Set_indent(a:line,ind)
    endfunction
 
@@ -441,7 +442,7 @@ function! Indent_form()
    let bot=[bot[0]+1,0]
    call Lisp_reader(top,bot,[])
    let noffset=match(getline(pos[0]),"[^\t\n ]")
-   let pos[1]=pos[1]+(noffset-offset)
+   let pos[1]=max([pos[1]+(noffset-offset),1])
    call Fix_screen(pos)
 endfunction
 
@@ -452,7 +453,7 @@ function! Indent_range(line1,line2)
    let offset=match(getline(pos[0]),"[^\t\n ]")
    call Lisp_reader([a:line1,0],[a:line2,0],range(a:line1,a:line2))
    let noffset=match(getline(pos[0]),"[^\t\n ]")
-   let pos[1]=pos[1]+(noffset-offset)
+   let pos[1]=max([pos[1]+(noffset-offset),1])
    call Fix_screen(pos)
 endfunction
    
@@ -468,7 +469,7 @@ function! Indent_line(count)
    let bot=[bot[0],bot[1]-1]
    call Lisp_reader(top,bot,range(pos[0],pos[0]+a:count-1))
    let noffset=match(getline(pos[0]),"[^\t\n ]")
-   let pos[1]=pos[1]+(noffset-offset)
+   let pos[1]=max([pos[1]+(noffset-offset),1])
    call Fix_screen(pos)
 endfunction
 
