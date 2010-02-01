@@ -155,12 +155,12 @@ function! Lisp_reader(pos_start,pos_end,lines)
 
    " script variables
    let s:lines=a:lines
-   let s:changed_indent={}
    let s:start=a:pos_start[0]
    let s:end=a:pos_end[0]
    let s:offset=a:pos_start[1]
    let s:current_line=s:start
-   let s:changed_indent[s:current_line]=0
+   let s:original_indent={}
+   let s:original_indent[s:current_line]=indent(s:current_line)
    let s:line=getline(s:current_line)
    let s:stack=[]
    let s:recurse=[] " because in any other language this would be recursive...
@@ -173,7 +173,7 @@ function! Lisp_reader(pos_start,pos_end,lines)
          if s:offset >= strlen(s:line)
             let s:current_line+=1
             let s:offset=0
-	    let s:changed_indent[s:current_line]=0
+	    let s:original_indent[s:current_line]=indent(s:current_line)
             let s:line=getline(s:current_line)
             return "\n"
          else
@@ -212,25 +212,27 @@ function! Lisp_reader(pos_start,pos_end,lines)
 	 return 0
       endif
 
+      let diff=indent(s:stack[0][1])-s:original_indent[s:stack[0][1]]
+
       let ind=0
       if len(s:recurse)>0 && len(s:recurse[0])>0 && type(s:recurse[0][0]) == 1
 	 if s:stack[0][3]=="literal" || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
-	    let ind=s:stack[0][2]+s:changed_indent[s:stack[0][1]]
+	    let ind=s:stack[0][2]
 	 elseif has_key(g:lispwords,s:recurse[0][0]) && g:lispwords[s:recurse[0][0]]!=-1
 	    if len(s:recurse[0])-1 < g:lispwords[s:recurse[0][0]]
-	       let ind=s:stack[0][2]+s:changed_indent[s:stack[0][1]]+3
+	       let ind=s:stack[0][2]+3
 	    else
-	       let ind=s:stack[0][2]+s:changed_indent[s:stack[0][1]]+1
+	       let ind=s:stack[0][2]+1
 	    endif
 	 elseif s:stack[0][4] >= 2
-	    let ind=s:stack[0][2]+s:changed_indent[s:stack[0][1]]+strlen(s:recurse[0][0])+1
+	    let ind=s:stack[0][2]+strlen(s:recurse[0][0])+1
 	 else
-	    let ind=s:stack[0][2]+s:changed_indent[s:stack[0][1]]+1
+	    let ind=s:stack[0][2]+1
 	 endif
       else
-	 let ind=s:stack[0][2]+s:changed_indent[s:stack[0][1]]
+	 let ind=s:stack[0][2]
       endif
-      let ind+= (match(getline(s:stack[0][1]),"[^\t]")*(&tabstop-1))
+      let ind+=diff + ((s:original_indent[s:stack[0][1]]/&tabstop)*(&tabstop-1))
       return Set_indent(a:line,ind)
    endfunction
 
@@ -265,9 +267,9 @@ function! Lisp_reader(pos_start,pos_end,lines)
 
 	 " do indentation!
 	 if c=="\n" && len(s:stack) > 0
-	    let s:changed_indent[s:current_line]+=s:Lisp_indent(s:current_line)
+	    call s:Lisp_indent(s:current_line)
 	 elseif c=="\n"
-	    let s:changed_indent[s:current_line]+=Set_indent(s:current_line,0)
+	    call Set_indent(s:current_line,0)
 	 endif
 
          let token=""
@@ -276,6 +278,12 @@ function! Lisp_reader(pos_start,pos_end,lines)
       " end paren breaks out unless we are in a macro
       elseif c==")" && index([5,6,9,10,11],state)==-1
          if len(s:stack) > 0
+	    " do we have multiple subforms on the first line?
+	    if len(s:stack) > 1
+	       if s:stack[0][1]==s:stack[1][1]
+		  let s:stack[1][4]+=1
+	       endif
+	    endif
             call remove(s:stack,0)
             if token!=""
                call add(s:recurse[0],token)
@@ -283,10 +291,6 @@ function! Lisp_reader(pos_start,pos_end,lines)
             if len(s:recurse) > 1
                let tmp=remove(s:recurse,0)
                call add(s:recurse[0],tmp)
-	       " do we have multiple subforms on the first line?
-	       if s:current_line==s:stack[0][1]
-		  let s:stack[0][4]+=1
-	       endif
             else
                call add(form,remove(s:recurse,0))
             endif
@@ -369,6 +373,10 @@ function! Lisp_reader(pos_start,pos_end,lines)
          elseif c=="\\"
             let state=6
             let save=0
+	 elseif c=="\n"
+	    if s:current_line-1 == s:stack[0][1]
+	       let s:stack[0][4]+=1
+	    endif
          endif
       elseif state==6
          let save=1
@@ -396,9 +404,9 @@ function! Lisp_reader(pos_start,pos_end,lines)
 	    
 	    " do indentation!
 	    if len(s:stack) > 0
-	       let s:changed_indent[s:current_line]+=s:Lisp_indent(s:current_line)
+	       call s:Lisp_indent(s:current_line)
 	    else
-	       let s:changed_indent[s:current_line]+=Set_indent(s:current_line,0)
+	       call Set_indent(s:current_line,0)
 	    endif
          endif
          " do nothing
@@ -445,6 +453,8 @@ function! Lisp_reader(pos_start,pos_end,lines)
 
    let s:stack=[]
    let s:recurse=[] " because in any other language this would be recursive...
+   let s:original_indent={}
+   let s:memoize_line=-1
 
    call garbagecollect()
    
