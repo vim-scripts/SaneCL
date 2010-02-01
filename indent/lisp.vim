@@ -25,15 +25,16 @@ endif
 let b:undo_ftplugin = "call CLUndo()"
 
 function! CLUndo()
+   call Write_lispwords()
    delcommand CLLoadLispwords
    delcommand CLIndentForm
    delcommand CLIndentRange
    delcommand CLIndentLine
-   nunmap <Tab>
-   iunmap <Tab>
-   vunmap <Tab>
-   nunmap <C-\>
-   iunmap <C-\>
+   nunmap <buffer> <Tab>
+   iunmap <buffer> <Tab>
+   vunmap <buffer> <Tab>
+   nunmap <buffer> <C-\>
+   iunmap <buffer> <C-\>
    let b:did_ftplugin=0
 endfunction
 
@@ -129,6 +130,25 @@ let lispwords=Parse_lispwords(g:lispwords_file)
 
 " -------------------------------------------------------
 
+function! Write_lispwords()
+   let lines=[]
+   for i in items(g:lispwords)
+      call add(lines,join(i," "))
+   endfor
+   try
+      call writefile(lines,glob(g:lispwords_file))
+   catch /E482:/
+      echo "Cannot create file"
+   endtry
+endfunction
+
+" -------------------------------------------------------
+
+function! Set_lispword(word,num)
+   let g:lispwords[a:word]=a:num
+endfunction
+
+" -------------------------------------------------------
 
 " Parses a lisp block
 function! Lisp_reader(pos_start,pos_end,lines)
@@ -481,12 +501,16 @@ command! -buffer CLLoadLispwords call Parse_lispwords(lispwords_file)
 command! -buffer CLIndentForm call Indent_form()
 command! -buffer -range CLIndentRange call Indent_range(<line1>,<line2>)
 command! -buffer -count=1 CLIndentLine call Indent_line(<count>)
+command! -buffer CLSaveWords call Write_lispwords()
+command! -buffer -nargs=+ CLSetWord call Set_lispword(<f-args>)
 
 nmap <buffer><silent> <Tab> :CLIndentLine<CR>
 imap <buffer><silent> <Tab> <Esc>:CLIndentLine<CR>a
 vmap <buffer><silent> <Tab> <Esc>:'<,'>CLIndentRange<CR>`<v`>
 nmap <buffer><silent> <C-\> :CLIndentForm<CR>
 imap <buffer><silent> <C-\> <Esc>:CLIndentForm<CR>a
+
+au! VimLeave *.lisp CLSaveWords
 
 " -------------------------------------------------------
 " Thanks for reading!
