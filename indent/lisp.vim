@@ -13,6 +13,9 @@ if exists("b:did_ftplugin")
 endif
 let b:did_ftplugin = 1
 
+" I use this here:
+" retab!
+
 " -------------------------------------------------------
 
 " where is the lispwords file default?
@@ -78,6 +81,9 @@ function! Set_indent(line,ind)
    let current=getline(a:line)
    " get previous indent
    let indent_size=match(current,"[^\n\t ]")
+   if indent_size==-1
+      let indent_size=strlen(current)
+   endif
    " cut off indentation whitespace
    let current=strpart(current,indent_size)
    let indent_size=indent(a:line)
@@ -152,6 +158,7 @@ endfunction
 
 " Parses a lisp block
 function! Lisp_reader(pos_start,pos_end,lines)
+
 
    " script variables
    let s:lines=a:lines
@@ -232,7 +239,10 @@ function! Lisp_reader(pos_start,pos_end,lines)
       else
 	 let ind=s:stack[0][2]
       endif
-      let ind+=diff + ((s:original_indent[s:stack[0][1]]/&tabstop)*(&tabstop-1))
+      let ind+=diff
+      if &expandtab==0
+	 let ind+=((s:original_indent[s:stack[0][1]]/&tabstop)*(&tabstop-1))
+      endif
       return Set_indent(a:line,ind)
    endfunction
 
@@ -472,7 +482,16 @@ function! Indent_form()
    let bot=[bot[0]+1,0]
    call Lisp_reader(top,bot,[])
    let noffset=match(getline(pos[0]),"[^\t\n ]")
-   let pos[1]=max([pos[1]+(noffset-offset),1])
+   let line=getline(pos[0])
+   let match=match(line,"[^ \t]")
+   if pos[1] >= match && match != -1
+      let pos[1]=max([pos[1]+(noffset-offset),1])
+   else
+      if match==-1
+	 let match=strlen(line)
+      endif
+      let pos[1]=max([1,match])
+   endif
    call Fix_screen(pos)
 endfunction
 
@@ -483,7 +502,16 @@ function! Indent_range(line1,line2)
    let offset=match(getline(pos[0]),"[^\t\n ]")
    call Lisp_reader([a:line1,0],[a:line2,0],range(a:line1,a:line2))
    let noffset=match(getline(pos[0]),"[^\t\n ]")
-   let pos[1]=max([pos[1]+(noffset-offset),1])
+   let line=getline(pos[0])
+   let match=match(line,"[^ \t]")
+   if pos[1] >= match && match != -1
+      let pos[1]=max([pos[1]+(noffset-offset),1])
+   else
+      if match==-1
+	 let match=strlen(line)
+      endif
+      let pos[1]=max([1,match])
+   endif
    call Fix_screen(pos)
 endfunction
    
@@ -495,11 +523,19 @@ function! Indent_line(count)
    normal ^[(
    let top=Position()
    let top=[top[0],top[1]-1]
-   let bot=Go_match()
-   let bot=[bot[0],bot[1]-1]
+   let bot=[pos[0],0]
    call Lisp_reader(top,bot,range(pos[0],pos[0]+a:count-1))
    let noffset=match(getline(pos[0]),"[^\t\n ]")
-   let pos[1]=max([pos[1]+(noffset-offset),1])
+   let line=getline(pos[0])
+   let match=match(line,"[^ \t]")
+   if pos[1] >= match && match != -1
+      let pos[1]=max([pos[1]+(noffset-offset),1])
+   else
+      if match==-1
+	 let match=strlen(line)
+      endif
+      let pos[1]=max([1,match])
+   endif
    call Fix_screen(pos)
 endfunction
 
@@ -507,6 +543,7 @@ endfunction
 " -------------------------------------------------------
 " BINDINGS
 
+" commands
 command! -buffer CLLoadLispwords call Parse_lispwords(lispwords_file)
 command! -buffer CLIndentForm call Indent_form()
 command! -buffer -range CLIndentRange call Indent_range(<line1>,<line2>)
@@ -514,11 +551,17 @@ command! -buffer -count=1 CLIndentLine call Indent_line(<count>)
 command! -buffer CLSaveWords call Write_lispwords()
 command! -buffer -nargs=+ CLSetWord call Set_lispword(<f-args>)
 
+" indentation maps
 nmap <buffer><silent> <Tab> :CLIndentLine<CR>
 imap <buffer><silent> <Tab> <Esc>:CLIndentLine<CR>a
 vmap <buffer><silent> <Tab> <Esc>:'<,'>CLIndentRange<CR>`<v`>
 nmap <buffer><silent> <C-\> :CLIndentForm<CR>
 imap <buffer><silent> <C-\> <Esc>:CLIndentForm<CR>a
+
+" set a newline to proper indent (basic cases)
+nmap <buffer><silent> o o<Tab>
+nmap <buffer><silent> O O<Tab>
+imap <buffer><silent> <CR> <CR><Tab>
 
 au! VimLeave *.lisp CLSaveWords
 
