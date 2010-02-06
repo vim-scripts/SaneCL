@@ -3,7 +3,7 @@
 """ SaneCL       - VimScript Common Lisp Indentation
 """
 """ Maintainer   - Eric O'Connor <oconnore@gmail.com>
-""" Last edit    - January 31, 2010
+""" Last edit    - February 6, 2010
 """ License      - Released under the VIM license
 """ ==============================================================
 """ ==============================================================
@@ -13,14 +13,33 @@ if exists("b:did_ftplugin")
 endif
 let b:did_ftplugin = 1
 
-" I use this here:
-" retab!
+" ----------------------------------------------------------------
 
-" -------------------------------------------------------
+" SETTABLE FEATURES HANDLED HERE :
+" g:CL_aggressive_literals
+" g:CL_retab_on_open
+" g:CL_lispwords_file
+
+" This will treat symbols beginning in [&':] as literals for indentation
+" purposes
+if !exists("g:CL_aggressive_literals")
+   let CL_aggressive_literals=1
+endif
+
+" Automatic retab - useful if you switch from expandtab - noexpandtab
+" (commonly emacs -> vim)
+if !exists("g:CL_retab_on_open")
+   let CL_retab_on_open=1
+endif
+
+" Do retab
+if CL_retab_on_open==1
+   retab!
+endif
 
 " where is the lispwords file default?
-if !exists("g:lispwords_file")
-   let g:lispwords_file="~/lispwords"
+if !exists("g:CL_lispwords_file")
+   let g:CL_lispwords_file="~/lispwords"
 endif
 
 " -------------------------------------------------------
@@ -33,28 +52,25 @@ function! CLUndo()
    delcommand CLIndentForm
    delcommand CLIndentRange
    delcommand CLIndentLine
+   delcommand CLSaveWords
+   delcommand CLSetWord
    nunmap <buffer> <Tab>
    iunmap <buffer> <Tab>
    vunmap <buffer> <Tab>
    nunmap <buffer> <C-\>
    iunmap <buffer> <C-\>
+   nunmap <buffer> o
+   nunmap <buffer> O
+   iunmap <buffer> <CR>
    let b:did_ftplugin=0
 endfunction
 
 " -------------------------------------------------------
 
 function! Position()
-   return [line("."),col("."),winline()-1,&wrap]
-endfunction
-
-" -------------------------------------------------------
-
-function! Jump(pos)
-   call cursor(a:pos[0],a:pos[1])
-endfunction
-
-function! Nowrap()
+   let wrap=&wrap
    set nowrap
+   return [line("."),col("."),winline()-1,wrap]
 endfunction
 
 " -------------------------------------------------------
@@ -70,24 +86,17 @@ endfunction
 
 " -------------------------------------------------------
 
-function! Get_indent(line)
-   let current=substitute(getline(a:line),"\t",repeat(" ",&tabstop),"g")
-   return match(current,"[^\t\n ]")
-endfunction
-
-" -------------------------------------------------------
-
 function! Set_indent(line,ind)
    let current=getline(a:line)
-   " get previous indent
+   " Get previous indent
    let indent_size=match(current,"[^\n\t ]")
    if indent_size==-1
       let indent_size=strlen(current)
    endif
-   " cut off indentation whitespace
+   " Cut off indentation whitespace
    let current=strpart(current,indent_size)
    let indent_size=indent(a:line)
-   " set according to vim rules
+   " Set according to vim rules
    if !&expandtab
       let tabs=a:ind / &tabstop
       let spaces=a:ind % &tabstop
@@ -95,7 +104,7 @@ function! Set_indent(line,ind)
    else
       let line=repeat(" ",a:ind).current
    endif
-   " commit and report changes
+   " Commit and report changes
    call setline(a:line,line)
    return a:ind - indent_size
 endfunction
@@ -132,17 +141,17 @@ function! Parse_lispwords(file)
 endfunction
 
 " and... parse
-let lispwords=Parse_lispwords(g:lispwords_file)
+let s:lispwords=Parse_lispwords(g:CL_lispwords_file)
 
 " -------------------------------------------------------
 
 function! Write_lispwords()
    let lines=[]
-   for i in items(g:lispwords)
+   for i in items(s:lispwords)
       call add(lines,join(i," "))
    endfor
    try
-      call writefile(lines,glob(g:lispwords_file))
+      call writefile(lines,glob(g:CL_lispwords_file))
    catch /E482:/
       echo "Cannot create file"
    endtry
@@ -151,7 +160,7 @@ endfunction
 " -------------------------------------------------------
 
 function! Set_lispword(word,num)
-   let g:lispwords[a:word]=a:num
+   let s:lispwords[a:word]=a:num
 endfunction
 
 " -------------------------------------------------------
@@ -223,10 +232,10 @@ function! Lisp_reader(pos_start,pos_end,lines)
 
       let ind=0
       if len(s:recurse)>0 && len(s:recurse[0])>0 && type(s:recurse[0][0]) == 1
-	 if s:stack[0][3]=="literal" || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
+	 if s:stack[0][3]=="literal" || (g:CL_aggressive_literals && strpart(s:recurse[0][0],0,1)=~"[:'&]") || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
 	    let ind=s:stack[0][2]
-	 elseif has_key(g:lispwords,s:recurse[0][0]) && g:lispwords[s:recurse[0][0]]!=-1
-	    if len(s:recurse[0])-1 < g:lispwords[s:recurse[0][0]]
+	 elseif has_key(s:lispwords,s:recurse[0][0]) && s:lispwords[s:recurse[0][0]]!=-1
+	    if len(s:recurse[0])-1 < s:lispwords[s:recurse[0][0]]
 	       let ind=s:stack[0][2]+3
 	    else
 	       let ind=s:stack[0][2]+1
@@ -305,7 +314,11 @@ function! Lisp_reader(pos_start,pos_end,lines)
                call add(form,remove(s:recurse,0))
             endif
          else
-            echo "Parentheses error."
+            echo "Parentheses error on ".s:current_line.",".s:offset
+            if !exists("g:paren_error")
+               let g:paren_error=[]
+            endif
+            call add(g:paren_error,[s:current_line,s:offset])
          endif
          let token=""
          let state=1
@@ -392,12 +405,15 @@ function! Lisp_reader(pos_start,pos_end,lines)
          let save=1
          let state=5
       """"""""""""""""""""""""""""""""""""
-      " STATE 7 - handle basic macros [char and comment]
+      " STATE 7 - handle basic macros [char,simple vector and comment]
       elseif state==7
          if c=="|"
             let state=10
          elseif c=="\\"
             let state=8
+         elseif c=="("
+            call s:Unget()
+            let state=1
          else
             let state=1
          endif
@@ -544,7 +560,7 @@ endfunction
 " BINDINGS
 
 " commands
-command! -buffer CLLoadLispwords call Parse_lispwords(lispwords_file)
+command! -buffer CLLoadLispwords call Parse_lispwords(CL_lispwords_file)
 command! -buffer CLIndentForm call Indent_form()
 command! -buffer -range CLIndentRange call Indent_range(<line1>,<line2>)
 command! -buffer -count=1 CLIndentLine call Indent_line(<count>)
