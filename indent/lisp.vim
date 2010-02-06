@@ -47,6 +47,10 @@ if !exists("g:CL_loop_keywords")
    let CL_loop_keywords=["always","append","appending","as","collect","collecting","count","counting","do","doing","finally","for","loop","if","initially","loop-finish","maximize","maximizing","minimize","minimizing","named","nconc","nconcing","never","repeat","return","sum","summing","thereis","unless","until","when","while","with"]
 endif
 
+if !exists("g:CL_flets")
+   let CL_flets=["flet","macrolet","labels"]
+endif
+
 " -------------------------------------------------------
 
 let b:undo_ftplugin = "call CLUndo()"
@@ -236,6 +240,7 @@ function! Lisp_reader(pos_start,pos_end,lines)
       let diff=indent(s:stack[0][1])-s:original_indent[s:stack[0][1]]
 
       let ind=0
+
       if len(s:recurse)>0 && len(s:recurse[0])>0 && type(s:recurse[0][0]) == 1
 	 if s:stack[0][3]=="literal" || (g:CL_aggressive_literals && strpart(s:recurse[0][0],0,1)=~"[:'&]") || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
 	    let ind=s:stack[0][2]
@@ -253,6 +258,14 @@ function! Lisp_reader(pos_start,pos_end,lines)
                let ind=s:stack[0][2]+2
             else
                let ind=s:stack[0][2]+4
+            endif
+         " ---------------------
+         " Flet, labels, etc.
+         elseif len(s:recurse) >= 3 && len(s:recurse[2]) > 0 && index(g:CL_flets,s:recurse[2][0]) != -1
+            if len(s:recurse[0])-1 < 1
+               let ind=s:stack[0][2]+3
+            else
+               let ind=s:stack[0][2]+1
             endif
          " ---------------------
          " END SPECIAL CASES
@@ -558,7 +571,7 @@ endfunction
 function! Indent_line(count)
    let pos=Position()
    let offset=match(getline(pos[0]),"[^\t\n ]")
-   normal ^[(
+   let top=Go_top()
    let top=Position()
    let top=[top[0],top[1]-1]
    let bot=[pos[0],0]
