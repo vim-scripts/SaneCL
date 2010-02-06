@@ -19,6 +19,7 @@ let b:did_ftplugin = 1
 " g:CL_aggressive_literals
 " g:CL_retab_on_open
 " g:CL_lispwords_file
+" g:CL_loop_keywords
 
 " This will treat symbols beginning in [&':] as literals for indentation
 " purposes
@@ -40,6 +41,10 @@ endif
 " where is the lispwords file default?
 if !exists("g:CL_lispwords_file")
    let g:CL_lispwords_file="~/lispwords"
+endif
+
+if !exists("g:CL_loop_keywords")
+   let CL_loop_keywords=["always","append","appending","as","collect","collecting","count","counting","do","doing","finally","for","loop","if","initially","loop-finish","maximize","maximizing","minimize","minimizing","named","nconc","nconcing","never","repeat","return","sum","summing","thereis","unless","until","when","while","with"]
 endif
 
 " -------------------------------------------------------
@@ -234,6 +239,23 @@ function! Lisp_reader(pos_start,pos_end,lines)
       if len(s:recurse)>0 && len(s:recurse[0])>0 && type(s:recurse[0][0]) == 1
 	 if s:stack[0][3]=="literal" || (g:CL_aggressive_literals && strpart(s:recurse[0][0],0,1)=~"[:'&]") || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
 	    let ind=s:stack[0][2]
+         " SPECIAL CASES :
+         " ---------------------
+         " Indent loop form
+         elseif s:recurse[0][0]=="loop"
+            " get first symbol on line because
+            " we haven't parsed this to the ast yet
+            let loop_word=getline(s:current_line)." "
+            let loop_ind=match(loop_word,"[^ \t]")
+            let loop_word=strpart(loop_word,loop_ind)
+            let loop_word=strpart(loop_word,0,max([0,match(loop_word,"[ \t]")]))
+            if index(g:CL_loop_keywords,loop_word) != -1
+               let ind=s:stack[0][2]+2
+            else
+               let ind=s:stack[0][2]+4
+            endif
+         " ---------------------
+         " END SPECIAL CASES
 	 elseif has_key(s:lispwords,s:recurse[0][0]) && s:lispwords[s:recurse[0][0]]!=-1
 	    if len(s:recurse[0])-1 < s:lispwords[s:recurse[0][0]]
 	       let ind=s:stack[0][2]+3
