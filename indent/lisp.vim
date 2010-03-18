@@ -47,6 +47,10 @@ if !exists("g:CL_loop_keywords")
    let CL_loop_keywords=["always","append","appending","as","collect","collecting","count","counting","do","doing","finally","for","loop","if","initially","loop-finish","maximize","maximizing","minimize","minimizing","named","nconc","nconcing","never","repeat","return","sum","summing","thereis","unless","until","when","while","with"]
 endif
 
+if !exists("g:CL_define_keywords")
+   let CL_define_keywords=["defun","defmacro","defclass"]
+endif
+
 if !exists("g:CL_flets")
    let CL_flets=["flet","macrolet","labels"]
 endif
@@ -161,6 +165,7 @@ function! Write_lispwords()
    endfor
    try
       call writefile(lines,glob(g:CL_lispwords_file))
+      echo "Wrote lispwords to ".g:CL_lispwords_file
    catch /E482:/
       echo "Cannot create file"
    endtry
@@ -241,24 +246,36 @@ function! Lisp_reader(pos_start,pos_end,lines)
 
       let ind=0
 
+      let grabbed_line=getline(s:current_line)." "
+      let grabbed_line=strpart(grabbed_line,match(grabbed_line,"[^ \t]"))
+
       if len(s:recurse)>0 && len(s:recurse[0])>0 && type(s:recurse[0][0]) == 1
-	 if s:stack[0][3]=="literal" || (g:CL_aggressive_literals && strpart(s:recurse[0][0],0,1)=~"[:'&]") || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
+	 if s:stack[0][3]=="literal" || (g:CL_aggressive_literals && strpart(s:recurse[0][0],0,1)=~"['&]") || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
 	    let ind=s:stack[0][2]
          " SPECIAL CASES :
+         " ---------------------
+         "  Level 1 comments
+         elseif grabbed_line[0]==";" && grabbed_line[1]!=";"
+            let ind=40
+         " ---------------------
+         "  Level 3+ comments
+         elseif strpart(grabbed_line,0,3)==";;;"
+            let ind=0
          " ---------------------
          " Indent loop form
          elseif s:recurse[0][0]=="loop"
             " get first symbol on line because
             " we haven't parsed this to the ast yet
-            let loop_word=getline(s:current_line)." "
-            let loop_ind=match(loop_word,"[^ \t]")
-            let loop_word=strpart(loop_word,loop_ind)
-            let loop_word=strpart(loop_word,0,max([0,match(loop_word,"[ \t]")]))
+            let loop_word=strpart(grabbed_line,0,max([0,match(grabbed_line,"[ \t]")]))
             if index(g:CL_loop_keywords,loop_word) != -1
                let ind=s:stack[0][2]+2
             else
                let ind=s:stack[0][2]+4
             endif
+         " ---------------------
+         " Definitions
+         elseif len(s:recurse) >= 2 && len(s:recurse[1]) >= 1 && len(s:recurse[1]) <= 2 && index(g:CL_define_keywords,s:recurse[1][0]) != -1
+            let ind=s:stack[0][2]
          " ---------------------
          " Flet, labels, etc.
          elseif len(s:recurse) >= 3 && len(s:recurse[2]) > 0 && index(g:CL_flets,s:recurse[2][0]) != -1
@@ -471,7 +488,7 @@ function! Lisp_reader(pos_start,pos_end,lines)
 	    endif
          endif
          " do nothing
-      """"""""""""""""""""""""""""""""""""
+      """"""""""""""""""""""""""""""""""""bi tuple
       " STATES 10 & 11 - multiline comments
       elseif state==10
          if c=="|"
@@ -517,7 +534,7 @@ function! Lisp_reader(pos_start,pos_end,lines)
    let s:original_indent={}
    let s:memoize_line=-1
 
-   call garbagecollect()
+   "call garbagecollect()
    
    return form
 endfunction
@@ -571,8 +588,15 @@ endfunction
 function! Indent_line(count)
    let pos=Position()
    let offset=match(getline(pos[0]),"[^\t\n ]")
-   let top=Go_top()
+   "let top=Go_top()
+   normal ^2[(
    let top=Position()
+   if top[0]==pos[0] && top[1] == pos[1]
+      if strpart(getline(top[0]),top[1]-1,1) != "("
+         call Set_indent(top[0],0)
+         return
+      endif
+   endif
    let top=[top[0],top[1]-1]
    let bot=[pos[0],0]
    call Lisp_reader(top,bot,range(pos[0],pos[0]+a:count-1))
@@ -610,9 +634,9 @@ nmap <buffer><silent> <C-\> :CLIndentForm<CR>
 imap <buffer><silent> <C-\> <Esc>:CLIndentForm<CR>a
 
 " set a newline to proper indent (basic cases)
-nmap <buffer><silent> o o<Tab>
-nmap <buffer><silent> O O<Tab>
-imap <buffer><silent> <CR> <CR><Tab>
+nnoremap <buffer><silent> o o<Esc>:CLIndentLine<CR>a
+nnoremap <buffer><silent> O O<Esc>:CLIndentLine<CR>a
+inoremap <buffer><silent> <CR> <CR><Esc>:CLIndentLine<CR>a
 
 au! VimLeave *.lisp CLSaveWords
 
