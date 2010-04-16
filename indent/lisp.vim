@@ -3,7 +3,7 @@
 """ SaneCL       - VimScript Common Lisp Indentation
 """
 """ Maintainer   - Eric O'Connor <oconnore@gmail.com>
-""" Last edit    - February 6, 2010
+""" Last edit    - April 16, 2010
 """ License      - Released under the VIM license
 """ ==============================================================
 """ ==============================================================
@@ -47,12 +47,16 @@ if !exists("g:CL_loop_keywords")
    let CL_loop_keywords=["always","append","appending","as","collect","collecting","count","counting","do","doing","finally","for","loop","if","initially","loop-finish","maximize","maximizing","minimize","minimizing","named","nconc","nconcing","never","repeat","return","sum","summing","thereis","unless","until","when","while","with"]
 endif
 
-if !exists("g:CL_define_keywords")
-   let CL_define_keywords=["defun","defmacro","defclass"]
-endif
-
 if !exists("g:CL_flets")
    let CL_flets=["flet","macrolet","labels"]
+endif
+
+if !exists("g:CL_auto_zero_limit")
+   let CL_auto_zero_limit=25
+endif
+
+if !exists("g:CL_auto_prefixes")
+   let CL_auto_prefixes=[["with-",1],["def",2],["make-",1],["map",1]]
 endif
 
 " -------------------------------------------------------
@@ -245,13 +249,27 @@ function! Lisp_reader(pos_start,pos_end,lines)
       let diff=indent(s:stack[0][1])-s:original_indent[s:stack[0][1]]
 
       let ind=0
-
+      
+      " Right now only used for loop indentation...
       let grabbed_line=getline(s:current_line)." "
       let grabbed_line=strpart(grabbed_line,match(grabbed_line,"[^ \t]"))
 
+      " Test for a string parent
       if len(s:recurse)>0 && len(s:recurse[0])>0 && type(s:recurse[0][0]) == 1
+         " Is the parent a literal?
 	 if s:stack[0][3]=="literal" || (g:CL_aggressive_literals && strpart(s:recurse[0][0],0,1)=~"['&]") || s:recurse[0][0] =~ '[+-]\?\([0-9]\+\.\?[0-9]*\|[0-9]*\.\?[0-9]\+\)'
 	    let ind=s:stack[0][2]
+         " ---------------------
+         " Explicit definitions
+         " Parent is found in lispwords with zero+ indent
+	 elseif has_key(s:lispwords,s:recurse[0][0]) && s:lispwords[s:recurse[0][0]]!=-1
+            " Have we hit the lispword number?
+	    if len(s:recurse[0])-1 < s:lispwords[s:recurse[0][0]]
+	       let ind=s:stack[0][2]+3
+	    else
+	       let ind=s:stack[0][2]+1
+	    endif
+         " ---------------------
          " SPECIAL CASES :
          " ---------------------
          "  Level 1 comments
@@ -267,15 +285,12 @@ function! Lisp_reader(pos_start,pos_end,lines)
             " get first symbol on line because
             " we haven't parsed this to the ast yet
             let loop_word=strpart(grabbed_line,0,max([0,match(grabbed_line,"[ \t]")]))
+            " if the first word is a loop word, reduce indent by 2
             if index(g:CL_loop_keywords,loop_word) != -1
                let ind=s:stack[0][2]+2
             else
                let ind=s:stack[0][2]+4
             endif
-         " ---------------------
-         " Definitions
-         elseif len(s:recurse) >= 2 && len(s:recurse[1]) >= 1 && len(s:recurse[1]) <= 2 && index(g:CL_define_keywords,s:recurse[1][0]) != -1
-            let ind=s:stack[0][2]
          " ---------------------
          " Flet, labels, etc.
          elseif len(s:recurse) >= 3 && len(s:recurse[2]) > 0 && index(g:CL_flets,s:recurse[2][0]) != -1
@@ -284,19 +299,39 @@ function! Lisp_reader(pos_start,pos_end,lines)
             else
                let ind=s:stack[0][2]+1
             endif
-         " ---------------------
-         " END SPECIAL CASES
-	 elseif has_key(s:lispwords,s:recurse[0][0]) && s:lispwords[s:recurse[0][0]]!=-1
-	    if len(s:recurse[0])-1 < s:lispwords[s:recurse[0][0]]
-	       let ind=s:stack[0][2]+3
-	    else
-	       let ind=s:stack[0][2]+1
-	    endif
-	 elseif s:stack[0][4] >= 2
-	    let ind=s:stack[0][2]+strlen(s:recurse[0][0])+1
-	 else
-	    let ind=s:stack[0][2]+1
-	 endif
+         " --------------------------------------------
+         " OK, now we have to calculate prefix matches
+         " --------------------------------------------
+         else
+            let prefix_match=-1
+            " Loop over potential prefixes
+            for pref in g:CL_auto_prefixes
+               if match(s:recurse[0][0],pref[0]) != -1
+                  let prefix_match = pref[1]
+               endif
+            endfor
+            " Did we find any?
+            if prefix_match != -1
+               " Have we hit the lispword number?
+               if len(s:recurse[0])-1 < prefix_match
+                  let ind=s:stack[0][2]+3
+               else
+                  let ind=s:stack[0][2]+1
+               endif
+            " ---------------------
+            " END SPECIAL CASES
+            " ---------------------
+            " Subforms on same line as parent, indent to word length
+            " NEW: unless word is too long (> CL_auto_word_limit). Set to -1
+            " to disable
+            elseif s:stack[0][4] >= 2 && (g:CL_auto_zero_limit == -1 || len(s:recurse[0][0]) <= g:CL_auto_zero_limit)
+               let ind=s:stack[0][2]+strlen(s:recurse[0][0])+1
+            " No subforms found on same line, indent normally
+            else
+               let ind=s:stack[0][2]+1
+            endif
+         endif
+      " Parent is not a string, it is a list!
       else
 	 let ind=s:stack[0][2]
       endif
@@ -488,7 +523,7 @@ function! Lisp_reader(pos_start,pos_end,lines)
 	    endif
          endif
          " do nothing
-      """"""""""""""""""""""""""""""""""""bi tuple
+      """"""""""""""""""""""""""""""""""""
       " STATES 10 & 11 - multiline comments
       elseif state==10
          if c=="|"
@@ -589,7 +624,7 @@ function! Indent_line(count)
    let pos=Position()
    let offset=match(getline(pos[0]),"[^\t\n ]")
    "let top=Go_top()
-   normal ^2[(
+   normal ^5[(
    let top=Position()
    if top[0]==pos[0] && top[1] == pos[1]
       if strpart(getline(top[0]),top[1]-1,1) != "("
