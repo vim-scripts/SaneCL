@@ -308,6 +308,7 @@ function! Lisp_reader(pos_start,pos_end,lines)
             for pref in g:CL_auto_prefixes
                if match(s:recurse[0][0],pref[0]) != -1
                   let prefix_match = pref[1]
+                  break
                endif
             endfor
             " Did we find any?
